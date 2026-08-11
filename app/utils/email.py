@@ -1,6 +1,7 @@
 """Envío de correos electrónicos usando fastapi-mail."""
 
 import logging
+import traceback
 from datetime import datetime, timezone
 
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema
@@ -12,6 +13,14 @@ from app.utils.email_templates import credentials_body, expired_body, issued_bod
 logger = logging.getLogger(__name__)
 
 _mail_config: ConnectionConfig | None = None
+_TRACEBACK_MAX_LEN = 4000
+
+
+def _root_cause_message(exc: Exception) -> str:
+    current = exc
+    while getattr(current, "__context__", None) is not None:
+        current = current.__context__
+    return str(current) or str(exc)
 
 
 def _get_mail_config() -> ConnectionConfig | None:
@@ -123,12 +132,18 @@ async def send_credentials_with_audit(
     """Envía credenciales y registra resultado en email_audit."""
     status = EmailStatus.failed.value
     error_text: str | None = None
+    traceback_text: str | None = None
     try:
         await send_credentials_email(email_to, password)
         status = EmailStatus.sent.value
     except Exception as e:
-        error_text = str(e)
+        error_text = _root_cause_message(e)
+        traceback_text = traceback.format_exc()[:_TRACEBACK_MAX_LEN]
         logger.exception("Error en send_credentials_with_audit para %s", email_to)
+
+    metadata_: dict[str, object] = {}
+    if traceback_text:
+        metadata_["traceback"] = traceback_text
 
     async with AsyncSessionLocal() as session:
         session.add(EmailAudit(
@@ -137,6 +152,7 @@ async def send_credentials_with_audit(
             email_type="credentials",
             status=status,
             error=error_text,
+            metadata_=metadata_,
             sent_at=datetime.now(timezone.utc) if status == EmailStatus.sent.value else None,
         ))
         await session.commit()
@@ -153,14 +169,20 @@ async def send_issued_with_audit(
     """Notifica emisión de certificado y registra resultado en email_audit."""
     status = EmailStatus.failed.value
     error_text: str | None = None
+    traceback_text: str | None = None
     try:
         await send_certificate_issued_email(
             email_to, student_name, certificate_uid, base_url, api_prefix
         )
         status = EmailStatus.sent.value
     except Exception as e:
-        error_text = str(e)
+        error_text = _root_cause_message(e)
+        traceback_text = traceback.format_exc()[:_TRACEBACK_MAX_LEN]
         logger.exception("Error en send_issued_with_audit para %s", email_to)
+
+    metadata_: dict[str, object] = {"certificate_uid": certificate_uid}
+    if traceback_text:
+        metadata_["traceback"] = traceback_text
 
     async with AsyncSessionLocal() as session:
         session.add(EmailAudit(
@@ -169,7 +191,7 @@ async def send_issued_with_audit(
             email_type="certificate_issued",
             status=status,
             error=error_text,
-            metadata_={"certificate_uid": certificate_uid},
+            metadata_=metadata_,
             sent_at=datetime.now(timezone.utc) if status == EmailStatus.sent.value else None,
         ))
         await session.commit()
@@ -184,12 +206,18 @@ async def send_expired_with_audit(
     """Notifica expiración de certificado y registra resultado en email_audit."""
     status = EmailStatus.failed.value
     error_text: str | None = None
+    traceback_text: str | None = None
     try:
         await send_certificate_expired_email(email_to, student_name, certificate_uid)
         status = EmailStatus.sent.value
     except Exception as e:
-        error_text = str(e)
+        error_text = _root_cause_message(e)
+        traceback_text = traceback.format_exc()[:_TRACEBACK_MAX_LEN]
         logger.exception("Error en send_expired_with_audit para %s", email_to)
+
+    metadata_: dict[str, object] = {"certificate_uid": certificate_uid}
+    if traceback_text:
+        metadata_["traceback"] = traceback_text
 
     async with AsyncSessionLocal() as session:
         session.add(EmailAudit(
@@ -198,7 +226,7 @@ async def send_expired_with_audit(
             email_type="certificate_expired",
             status=status,
             error=error_text,
-            metadata_={"certificate_uid": certificate_uid},
+            metadata_=metadata_,
             sent_at=datetime.now(timezone.utc) if status == EmailStatus.sent.value else None,
         ))
         await session.commit()
