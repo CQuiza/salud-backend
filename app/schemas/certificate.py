@@ -39,6 +39,17 @@ class CertificateUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class CertificateRenewRequest(BaseModel):
+    """Renovación — reemplaza el certificado actual por uno nuevo."""
+
+    issued_at: datetime | None = Field(
+        default=None, description="Fecha de emisión del certificado renovado (default: hoy)"
+    )
+    validity_extension: int | None = Field(
+        default=None, description="Sobreescribe la vigencia del tipo (en años, default: vigencia original)"
+    )
+
+
 class CertificateRead(BaseModel):
     id: int
     unique_id: UUID
@@ -68,6 +79,9 @@ class CertificateBatchIssueRequest(BaseModel):
     certificate_type_ids: list[int]
     issued_at: datetime | None = Field(
         default=None, description="Fecha personalizada de emisión"
+    )
+    validity_extension: int | None = Field(
+        default=None, description="Sobreescribe la vigencia del tipo (en años); aplica a la emisión de un único tipo"
     )
 
 

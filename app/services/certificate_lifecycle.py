@@ -134,6 +134,49 @@ class CertificateLifecycleService:
                      uid, student.email, ct.name)
         return cert
 
+    async def renew_certificate(
+        self,
+        db: AsyncSession,
+        *,
+        admin: User,
+        cert: Certificate,
+        issued_at: datetime | None = None,
+        validity_extension: int | None = None,
+        background_tasks=None,
+    ) -> Certificate:
+        """Renueva un certificado: emite uno nuevo y revoca el actual."""
+        if cert.status not in (
+            CertificateStatus.active.value,
+            CertificateStatus.expired.value,
+        ):
+            raise ValueError(
+                "Solo pueden renovarse certificados activos o expirados"
+            )
+        if cert.user_id is None or cert.certificate_type_id is None:
+            raise ValueError("El certificado no tiene usuario o tipo asociado")
+
+        logger.info(
+            "Renovando certificado — old_uid=%s, admin=%s",
+            cert.unique_id, admin.email,
+        )
+
+        new_cert = await self.issue_certificate(
+            db,
+            admin=admin,
+            user_id=cert.user_id,
+            certificate_type_id=cert.certificate_type_id,
+            issued_at=issued_at,
+            validity_extension=validity_extension,
+            background_tasks=background_tasks,
+        )
+        await self.revoke_certificate(db, admin=admin, cert=cert)
+
+        logger.info(
+            "Certificado renovado — old_uid=%s, new_uid=%s",
+            cert.unique_id, new_cert.unique_id,
+        )
+        return new_cert
+
     async def revoke_certificate(
         self,
         db: AsyncSession,
