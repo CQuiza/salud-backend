@@ -110,6 +110,8 @@ class CertificateRepository:
         status: str,
         qr_code_url: str | None,
         pdf_url: str | None,
+        hours: int | None = None,
+        validity_years: int | None = None,
     ) -> Certificate:
         data: dict[str, object] = dict(
             certificate_type_id=certificate_type_id,
@@ -122,6 +124,10 @@ class CertificateRepository:
             data["issued_at"] = issued_at
         if expires_at is not None:
             data["expires_at"] = expires_at
+        if hours is not None:
+            data["hours"] = hours
+        if validity_years is not None:
+            data["validity_years"] = validity_years
         c = Certificate(**data)
         db.add(c)
         await db.flush()
@@ -129,7 +135,7 @@ class CertificateRepository:
         return c
 
     async def update(self, db: AsyncSession, cert: Certificate, fields: dict[str, object]) -> Certificate:
-        allowed = {"status", "qr_code_url", "pdf_url"}
+        allowed = {"status", "qr_code_url", "pdf_url", "issued_at", "expires_at", "hours", "validity_years"}
         for k, v in fields.items():
             if k in allowed:
                 setattr(cert, k, v)

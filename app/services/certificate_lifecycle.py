@@ -46,6 +46,7 @@ class CertificateLifecycleService:
         certificate_type_id: int,
         issued_at: datetime | None = None,
         validity_extension: int | None = None,
+        hours: int | None = None,
         background_tasks=None,
     ):
         """Crea certificado, genera PDF, sube a MinIO, audita y notifica."""
@@ -96,6 +97,8 @@ class CertificateLifecycleService:
             status=CertificateStatus.active.value,
             qr_code_url=None,
             pdf_url=None,
+            hours=hours,
+            validity_years=validity_extension,
         )
         uid = str(cert.unique_id)
         cert.pdf_url = f"{base}{api}/certificates/view/{uid}"
@@ -107,6 +110,7 @@ class CertificateLifecycleService:
         pdf_bytes, qr_bytes = self._pdf.generate(
             student, ct, issued_at, verify_url, settings,
             validity_years=validity_years,
+            hours=hours,
         )
         await self._storage.upload_certificate_files(uid, pdf_bytes, qr_bytes)
 
@@ -142,9 +146,10 @@ class CertificateLifecycleService:
         cert: Certificate,
         issued_at: datetime | None = None,
         validity_extension: int | None = None,
+        hours: int | None = None,
         background_tasks=None,
     ) -> Certificate:
-        """Renueva un certificado: emite uno nuevo y revoca el actual."""
+        """Renueva un certificado EN SU LUGAR: re-emite la misma fila (mismo unique_id, sin revocar)."""
         if cert.status not in (
             CertificateStatus.active.value,
             CertificateStatus.expired.value,
@@ -155,27 +160,100 @@ class CertificateLifecycleService:
         if cert.user_id is None or cert.certificate_type_id is None:
             raise ValueError("El certificado no tiene usuario o tipo asociado")
 
-        logger.info(
-            "Renovando certificado — old_uid=%s, admin=%s",
-            cert.unique_id, admin.email,
-        )
+        if issued_at is not None:
+            if issued_at.tzinfo is None:
+                issued_at = issued_at.replace(tzinfo=UTC)
+        else:
+            issued_at = datetime.now(UTC)
 
-        new_cert = await self.issue_certificate(
-            db,
-            admin=admin,
-            user_id=cert.user_id,
-            certificate_type_id=cert.certificate_type_id,
-            issued_at=issued_at,
-            validity_extension=validity_extension,
-            background_tasks=background_tasks,
+        ct = await certificate_type_repository.get_by_id(db, cert.certificate_type_id)
+        if not ct:
+            raise ValueError("Tipo de certificado no existe")
+
+        vt = ct.validity_type
+        vv = ct.validity_value
+        if validity_extension is not None:
+            vt = "years"
+            vv = validity_extension
+        expires_at = compute_certificate_expires_at(issued_at, vt, vv)
+
+        fields: dict[str, object] = {"issued_at": issued_at, "expires_at": expires_at}
+        if hours is not None:
+            fields["hours"] = hours
+        if validity_extension is not None:
+            fields["validity_years"] = validity_extension
+
+        updated = await certificate_repository.update(db, cert, fields)
+        await db.refresh(updated)
+        uid = str(updated.unique_id)
+
+        try:
+            pdf_bytes = await self._pdf.regenerate(db, updated)
+            await self._storage.upload_pdf(uid, pdf_bytes)
+        except Exception as exc:
+            logger.exception("Error al regenerar PDF al renovar — uid=%s", uid)
+            msg = "No se pudo regenerar el PDF del certificado en MinIO."
+            raise RuntimeError(msg) from exc
+
+        db.add(
+            CertificateAudit(
+                certificate_id=updated.id,
+                certificate_unique_id=updated.unique_id,
+                action=CertificateAuditAction.renewed.value,
+                performed_by=admin.id,
+            )
         )
-        await self.revoke_certificate(db, admin=admin, cert=cert)
+        await db.flush()
+
+        if background_tasks:
+            student = await user_repository.get_by_id(db, updated.user_id)
+            if student:
+                settings = get_settings()
+                base = settings.base_url.rstrip("/")
+                api = settings.api_v1_prefix.rstrip("/")
+                self._notification.notify_issued(
+                    student.email,
+                    student_display_name(student),
+                    uid,
+                    base,
+                    api,
+                    background_tasks,
+                )
 
         logger.info(
-            "Certificado renovado — old_uid=%s, new_uid=%s",
-            cert.unique_id, new_cert.unique_id,
+            "Certificado renovado en su lugar — uid=%s, admin=%s",
+            uid, admin.email,
         )
-        return new_cert
+        return updated
+
+    async def reproduce_active_for_student(
+        self,
+        db: AsyncSession,
+        *,
+        student_id: int,
+        admin: User,
+    ) -> int:
+        """Regenera en su lugar los PDFs de los certificados ACTIVOS de un estudiante."""
+        certs = await certificate_repository.list_by_user(
+            db, student_id, statuses=[CertificateStatus.active.value], limit=5000
+        )
+        count = 0
+        for cert in certs:
+            uid = str(cert.unique_id)
+            pdf_bytes = await self._pdf.regenerate(db, cert)
+            await self._storage.upload_pdf(uid, pdf_bytes)
+            db.add(
+                CertificateAudit(
+                    certificate_id=cert.id,
+                    certificate_unique_id=cert.unique_id,
+                    action=CertificateAuditAction.reproduced.value,
+                    performed_by=admin.id,
+                )
+            )
+            await db.flush()
+            count += 1
+        logger.info("Certificados activos reproducidos — student_id=%s, count=%s", student_id, count)
+        return count
 
     async def revoke_certificate(
         self,

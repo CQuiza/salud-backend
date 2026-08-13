@@ -80,6 +80,8 @@ CREATE TABLE certificates (
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     issued_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     expires_at TIMESTAMP,            -- calculado automáticamente
+    hours INTEGER,                   -- override de intensidad horaria (NULL = tipo)
+    validity_years INTEGER,          -- override de vigencia en años (NULL = tipo)
     status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')), -- actualizable
     qr_code_url VARCHAR(255),        -- ruta al QR generado
     pdf_url VARCHAR(255),            -- ruta al PDF base (sin marca)

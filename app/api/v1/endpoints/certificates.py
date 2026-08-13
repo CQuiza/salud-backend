@@ -236,6 +236,7 @@ async def batch_issue_certificates(
                 certificate_type_id=ct_id,
                 issued_at=body.issued_at,
                 validity_extension=body.validity_extension,
+                hours=body.hours,
                 background_tasks=background_tasks,
             )
             issued.append(CertificateRead.model_validate(cert))
@@ -308,6 +309,7 @@ async def renew_certificate(
             cert=cert,
             issued_at=body.issued_at,
             validity_extension=body.validity_extension,
+            hours=body.hours,
             background_tasks=background_tasks,
         )
         await db.commit()
@@ -348,7 +350,7 @@ async def search_certificates_by_identity(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """Público: busca certificados por número de identidad del estudiante."""
-    user = await user_repository.get_by_identity_number(db, identity_number)
+    user = await user_repository.get_by_identity_number(db, identity_number.strip())
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No se encontraron certificados para esta identidad")
     from sqlalchemy.orm import selectinload

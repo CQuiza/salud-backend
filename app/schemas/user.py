@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models.enums import IdentityType, UserRole
 
@@ -18,6 +18,11 @@ class UserBase(BaseModel):
     identity_number: str = Field(..., max_length=50)
     phone_number: str | None = Field(default=None, max_length=20)
     is_active: bool = True
+
+    @field_validator("identity_number")
+    @classmethod
+    def _strip_identity_number(cls, v: str) -> str:
+        return v.strip()
 
 
 class UserCreate(UserBase):
@@ -40,6 +45,13 @@ class UserUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("identity_number")
+    @classmethod
+    def _strip_identity_number_update(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return v.strip()
+
 
 class UserRead(BaseModel):
     id: int
@@ -56,6 +68,10 @@ class UserRead(BaseModel):
     is_active: bool
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserUpdateResponse(UserRead):
+    certificates_regenerated: int = 0
 
 
 
