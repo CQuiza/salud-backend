@@ -132,6 +132,7 @@ class CertificateLifecycleService:
                 base,
                 api,
                 background_tasks,
+                certificate_type_name=ct.name,
             )
 
         logger.info("Certificado emitido — uid=%s, student=%s, ct=%s",
@@ -218,6 +219,7 @@ class CertificateLifecycleService:
                     base,
                     api,
                     background_tasks,
+                    certificate_type_name=ct.name,
                 )
 
         logger.info(

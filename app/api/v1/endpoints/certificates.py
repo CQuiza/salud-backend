@@ -204,6 +204,7 @@ async def create_certificate(
             certificate_type_id=body.certificate_type_id,
             issued_at=body.issued_at,
             validity_extension=body.validity_extension,
+            hours=body.hours,
             background_tasks=background_tasks,
         )
         await db.commit()
