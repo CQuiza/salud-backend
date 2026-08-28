@@ -178,7 +178,11 @@ class CertificateLifecycleService:
             vv = validity_extension
         expires_at = compute_certificate_expires_at(issued_at, vt, vv)
 
-        fields: dict[str, object] = {"issued_at": issued_at, "expires_at": expires_at}
+        fields: dict[str, object] = {
+            "issued_at": issued_at,
+            "expires_at": expires_at,
+            "status": CertificateStatus.active.value,
+        }
         if hours is not None:
             fields["hours"] = hours
         if validity_extension is not None:
